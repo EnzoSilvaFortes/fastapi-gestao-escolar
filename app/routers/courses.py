@@ -1,43 +1,44 @@
-from fastapi import APIRouter, status, HTTPException
+from fastapi import APIRouter, status, HTTPException, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import select
 from app.schemas.courses import CursoListPublicSchema, CursoPublicSchema, CursoSchema, CursoUpdateSchema
-from typing import Optional, List
+from app.models.cursos import Curso
+from app.core.database import get_session
 
 router = APIRouter()
 
-# Simulando o banco de dados PRODUTOS que o professor usou, mas para CURSOS
-CURSOS = []
+@router.get('/', response_model=CursoListPublicSchema, status_code=status.HTTP_200_OK)
+def curso_list(session: Session = Depends(get_session)):
+    cursos = session.scalars(select(Curso)).all()
+    return {'cursos': list(cursos)}
 
-@router.get(path='/', response_model=CursoListPublicSchema, status_code=status.HTTP_200_OK)
-def curso_list():
-    # Retorna a lista com todos os cursos cadastrados
-    return {'cursos': CURSOS}
+@router.post('/', response_model=CursoPublicSchema, status_code=status.HTTP_201_CREATED)
+def curso_create(curso: CursoSchema, session: Session = Depends(get_session)):
+    novo_curso = Curso(**curso.model_dump())
+    session.add(novo_curso)
+    session.commit()
+    session.refresh(novo_curso)
+    return novo_curso
 
-
-@router.post(path='/', response_model=CursoPublicSchema, status_code=status.HTTP_201_CREATED)
-def curso_create(curso: CursoSchema):
-    # A função model_dump() desestrutura o objeto para ser compreendido como um json
-    curso_id = CursoPublicSchema(**curso.model_dump(), id=len(CURSOS)+1)
-    CURSOS.append(curso_id)
-    return curso_id
-
-
-@router.put(path='/{id}', response_model=CursoPublicSchema, status_code=status.HTTP_201_CREATED)
-def curso_update(id_curso: int, curso: CursoUpdateSchema):
-    # Verifica se o id_curso está maior no intervalo de 1 ao tamanho da lista, caso contrário dispara uma exception.
-    if id_curso > len(CURSOS) or id_curso < 1:
+@router.put('/{id}', response_model=CursoPublicSchema, status_code=status.HTTP_200_OK)
+def curso_update(id: int, curso: CursoUpdateSchema, session: Session = Depends(get_session)):
+    curso_db = session.scalar(select(Curso).where(Curso.id == id))
+    if not curso_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Course Not Found')
     
-    curso_editado = CursoPublicSchema(**curso.model_dump(), id=id_curso)
-    CURSOS[id_curso - 1] = curso_editado
-    return curso_editado
+    for key, value in curso.model_dump(exclude_unset=True).items():
+        setattr(curso_db, key, value)
+        
+    session.commit()
+    session.refresh(curso_db)
+    return curso_db
 
-
-@router.delete(path='/{id}')
-def curso_delete(id_curso: int):
-    # Mesma validação realizada no curso_update
-    if id_curso > len(CURSOS) or id_curso < 1:
+@router.delete('/{id}', status_code=status.HTTP_200_OK)
+def curso_delete(id: int, session: Session = Depends(get_session)):
+    curso_db = session.scalar(select(Curso).where(Curso.id == id))
+    if not curso_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Course Not Found')
     
-    # del deleta um determinado elemento da lista pelo seu índice
-    del CURSOS[id_curso - 1]
+    session.delete(curso_db)
+    session.commit()
     return {"detail": "Curso deletado com sucesso"}
